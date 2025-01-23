@@ -17,6 +17,7 @@ final class Cool_Kids {
 	private static $instance = null;
 
 	private $roles = array( 'cool_kid', 'cooler_kid', 'coolest_kid' );
+	private $api_key = 'test-api-key';
 
 	private function __construct() {
 		add_action( 'init', array( $this, 'init' ) );
@@ -38,7 +39,6 @@ final class Cool_Kids {
 		$this->add_actions();
 		$this->setup_shortcodes();
 		$this->enqueue_assets();
-		//setup rest api
 		$this->setup_rest_api();
 	}
 
@@ -48,6 +48,21 @@ final class Cool_Kids {
 		add_role( 'cooler_kid', 'Cooler Kid', array( 'read' => true ) );
 		add_role( 'coolest_kid', 'Coolest Kid', array( 'read' => true ) );
 		//add field if user is a cool kid
+
+		//add capability to cooler_kid
+		$cooler_kid  = get_role( 'cooler_kid' );
+		$coolest_kid = get_role( 'coolest_kid' );
+
+		$cooler_kid->add_cap( 'view_users_country' );
+		$coolest_kid->add_cap( 'view_users_country' );
+
+		$cooler_kid->add_cap( 'view_users_name' );
+		$coolest_kid->add_cap( 'view_users_name' );
+
+		$coolest_kid->add_cap( 'view_users_email' );
+		$coolest_kid->add_cap( 'view_users_role' );
+
+
 	}
 
 	private function add_actions() {
@@ -64,9 +79,12 @@ final class Cool_Kids {
 	private function enqueue_assets() {
 		add_action( 'wp_enqueue_scripts', function () {
 			wp_enqueue_style( 'cool-kids', plugin_dir_url( __FILE__ ) . 'assets/css/dist/cool-kids.css', array(), '1.0.0' );
-			wp_enqueue_script( 'cool-kids', plugin_dir_url( __FILE__ ) . 'assets/js/cool-kids.js', array(), '1.0.0', true );
 			//alpine js
-			wp_enqueue_script( 'alpinejs', 'https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js' );
+			wp_enqueue_script( 'cool-kids', plugin_dir_url( __FILE__ ) . 'assets/js/cool-kids.js', array(), '1.0.0', true );
+
+			wp_enqueue_script( 'alpinejs', 'https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js', array(), '3.14.8', true );
+
+
 		} );
 	}
 
@@ -94,7 +112,7 @@ final class Cool_Kids {
 			register_rest_route( 'cool-kids/v1', '/login', array(
 				'methods'             => 'POST',
 				'callback'            => array( $this, 'rest_login' ),
-				'permission_callback' => array( $this, 'verify_nonce' ),
+				'permission_callback' => '__return_true',
 				'args'                => array(
 					'email' => array(
 						'required'          => true,
@@ -110,14 +128,131 @@ final class Cool_Kids {
 
 			//register my account
 			register_rest_route( 'cool-kids/v1', '/my-account', array(
+				'methods'  => 'GET',
+				'callback' => array( $this, 'rest_my_account' ),
+
+
+				'permission_callback' => function ( $request ) {
+					return $this->verify_nonce( $request, 'wp_rest' ); // Highlighted action parameter
+				},
+
+				//'permission_callback' => function () {
+				//	return is_user_logged_in(); // Ensure the user is logged in
+				//	},
+				//'permission_callback' => '__return_true',
+			) );
+
+			//list accounts
+			register_rest_route( 'cool-kids/v1', '/list', array(
 				'methods'             => 'GET',
-				'callback'            => array( $this, 'rest_my_account' ),
-				//'permission_callback' => array( $this, 'verify_nonce' ),
-				'permission_callback' => '__return_true',
+				'callback'            => array( $this, 'rest_list' ),
+				'permission_callback' => array( $this, 'verify_nonce' ),
+			) );
+
+			//put // update user role  by email or (firstname and last name) using api key not nonce
+			register_rest_route( 'cool-kids/v1', '/update-role', array(
+				'methods'             => 'PATCH',
+				'callback'            => array( $this, 'rest_update_role' ),
+				'permission_callback' => function ( $request ) {
+					$api_key = $request->get_header( 'X-API-Key' ); // Highlighted API key check
+
+					return $api_key === $this->api_key;
+				},
+
 			) );
 
 
 		} );
+	}
+
+	public function verify_nonce( $request, $action = 'wp_rest' ) {
+		$nonce = $request->get_header( 'X-WP-Nonce' );
+
+
+		if ( ! wp_verify_nonce( $nonce, $action ) ) {
+			return new WP_Error( 'rest_forbidden', esc_html__( 'Invalid nonce 2' . $nonce ), array(
+				'status' => 403,
+				'error'  => true
+			) );
+		}
+
+		return true;
+	}
+
+	function rest_update_role( WP_REST_Request $data ) {
+
+		$email = sanitize_email( $data->get_param( "email" ) );
+		$role  = sanitize_text_field( $data->get_param( 'role' ) );
+		if ( ! in_array( $role, $this->roles ) ) {
+			return new WP_Error( 'rest_login_failed', esc_html__( 'Invalid role ' ), array(
+				'status' => 403,
+				'error'  => true
+			) );
+		}
+
+		$user = get_user_by( 'email', $email );
+		if ( ! $user ) {
+			return new WP_Error( 'rest_login_failed', esc_html__( 'Invalid email ' ) . $data_params['email'], array(
+				'status' => 403,
+				'error'  => true
+			) );
+		}
+
+		$user->set_role( $data->get_param( 'role' ) );
+
+		return array(
+			'message'    => 'User role updated successfully',
+			'success'    => true,
+			'email'      => $email,
+			'role'       => $role,
+			'first_name' => $user->first_name,
+			'last_name'  => $user->last_name,
+		);
+	}
+
+	public function rest_list( $data ) {
+		$can_view_name    = current_user_can( 'view_users_name' );
+		$can_view_country = current_user_can( 'view_users_country' );
+		$can_view_email   = current_user_can( 'view_users_email' );
+		$can_view_role    = current_user_can( 'view_users_role' );
+
+		if ( ! $can_view_name ) {
+			return [];
+		}
+		$page     = $data->get_param( 'page' ) ? intval( $data->get_param( 'page' ) ) : 1;
+		$per_page = $data->get_param( 'per_page' ) ? intval( $data->get_param( 'per_page' ) ) : 10;
+
+		$args = [
+			'role__in' => $this->roles, // Array of roles to filter by
+			'order'    => 'ASC', // Optional: Ascending order
+			'fields'   => 'all', // Return full user objects
+			'number'   => $per_page,
+			'offset'   => ( $page - 1 ) * $per_page,
+		];
+
+
+		// Get users
+		$users = get_users( $args );
+
+		$users_data = array();
+		foreach ( $users as $user ) {
+			$role = "";
+			if ( ! empty( $user->roles ) ) {
+				$role = ucwords( str_replace( '_', ' ', $user->roles[0] ) );
+			}
+			$country      = get_user_meta( $user->ID, 'cool_kid_country', true );
+			$user_data    = array(
+				'first_name' => $can_view_name ? esc_html( $user->first_name ) : '',
+				'last_name'  => $can_view_name ? esc_html( $user->last_name ) : '',
+				'email'      => $can_view_email ? esc_html( $user->user_email ) : '',
+				'country'    => $can_view_country ? esc_html( $country ) : '',
+				'role'       => $can_view_role ? esc_html( $role ) : '',
+				'initials'   => $can_view_name ? strtoupper( substr( $user->first_name, 0, 1 ) . substr( $user->last_name, 0, 1 ) ) : 'CK'
+			);
+			$users_data[] = $user_data;
+		}
+
+		return $users_data;
 	}
 
 	public function add_user_fields( $user ) {
@@ -175,7 +310,6 @@ final class Cool_Kids {
 
 	public function shortcode_my_account() {
 
-		//load views/signup.php
 
 		$nonce        = wp_create_nonce( 'wp_rest' );
 		$is_logged_in = is_user_logged_in();
@@ -200,11 +334,11 @@ final class Cool_Kids {
 			'email'      => esc_html( $user->user_email ),
 			'country'    => esc_html( $country ),
 			'role'       => esc_html( $role ),
+			'initials'   => strtoupper( substr( $user->first_name, 0, 1 ) . substr( $user->last_name, 0, 1 ) )
 		);
 
 		return $user_data;
 	}
-
 
 	public function rest_login( $data ) {
 
@@ -227,15 +361,34 @@ final class Cool_Kids {
 			) );
 		}
 
-		$nonce = wp_create_nonce( 'wp_rest' );
+
+		//	wp_set_auth_cookie( $user->ID, true, false );
 
 		//wp_set_auth_cookie( $user );
 
-		//cookie for rest
+		//get the set cookie
+		//$cookie = $_COOKIE;
+
+		//forma cookie key=value
+		//	$cookie = http_build_query( $cookie, '', ';' );
+		//get the Set Cookie  value for  fetch
+
+		//cookie for
 
 
-		return array( 'message' => 'User logged in successfully', 'success' => true, 'nonce' => $nonce );
+		$cookie = "test";
+
+		//new nonce
+		$nonce = wp_create_nonce( 'wp_rest' );
+
+		return array(
+			'message' => 'User logged in successfully',
+			'success' => true,
+			'nonce'   => $nonce
+		);
 	}
+
+	//setup rest bearer token
 
 	public function rest_signup( $data ) {
 
@@ -262,22 +415,6 @@ final class Cool_Kids {
 
 		return array( 'message' => 'User created successfully', 'success' => true );
 
-	}
-
-	//setup rest bearer token
-
-	public function verify_nonce( $request ) {
-		$nonce = $request->get_header( 'X-WP-Nonce' );
-
-
-		if ( ! wp_verify_nonce( $nonce, 'wp_rest' ) ) {
-			return new WP_Error( 'rest_forbidden', esc_html__( 'Invalid nonce' . $nonce ), array(
-				'status' => 403,
-				'error'  => true
-			) );
-		}
-
-		return true;
 	}
 
 
