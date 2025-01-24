@@ -1,125 +1,128 @@
-function coolKidLoginForm(nonce) {
-	return {
-		email: '',
-		isLoggedIn: false,  // Initially, the user is not logged in
+document.addEventListener('alpine:init', () => {
+	Alpine.store('CoolKids', {
+		isLoaded: false,
 		errorMessage: '',
+		isLoggedIn: false,
+		page:'main',
+		login: {
+			show:false,
+			email: '',
+			errorMessage: '',
+			submitForm() {
 
-		submitForm() {
-			fetch('/wp-json/cool-kids/v1/login', {
-				method: 'POST',
-				headers: {
-					'Content-Type': 'application/json',
-					//	'X-WP-Nonce': nonce,
-				},
-				body: JSON.stringify({
-					email: this.email
+				wp.apiFetch({
+					path: '/cool-kids/v1/login',
+					method: 'POST',
+					data: {
+						email: this.login.email,
+					},
 				})
-			})
-				.then(response => response.json())
-				.then(data => {
+					.then((data) => {
 						if (!data.success) {
 							this.errorMessage = data.message;
 							return;
 						}
+						this.isLoggedIn = true;
+						 location.reload();
+					})
+					.catch((error) => {
+						console.error('Error:', error);
+						this.errorMessage = error.message;
+					});
+			},
+		},
+
+		myAccount: {
+			email: '',
+			first_name: '',
+			last_name: '',
+			initials: '',
+			role: '',
+			country: '',
+			errorMessage: '',
+			getAccount() {
+				wp.apiFetch({path: 'cool-kids/v1/my-account'})
+					.then((data) => {
+
+						this.email = data.email;
+						this.first_name = data.first_name;
+						this.last_name = data.last_name;
+						this.initials = data.initials;
+						this.role = data.role;
+						this.country = data.country;
+					})
+					.catch((error) => {
+						this.errorMessage = error.message;
+					});
+			},
+		},
+
+		users: {
+			list: [],
+			pager: {
+				page: 1,
+				showLoadMore: false,
+			},
+
+			get() {
+				wp.apiFetch({path: 'cool-kids/v1/list?page=' + this.pager.page})
+					.then((data) => {
+						if (data.error) {
+							this.errorMessage = data.message;
+							return;
+						}
+						this.pager.showLoadMore = data.length > 0;
+						this.list = [...this.list, ...data];
+					})
+					.catch((error) => {
+						this.errorMessage = error.message;
+					});
+			},
+		},
 
 
-						document.cookie = data.cookie
-						this.isLoggedIn = true;  // Update the login state
 
-						//reload
-						location.reload();
-						//	setTimeout(() => {
-						//this.$dispatch('login', {isLoggedIn: true, nonce: data?.nonce});
-						//}, 100);  // Delay of 1 second
+		signup:{
 
-						// Dispatch an event to notify `coolKidMyAccount` component to refresh the data
-					}
-				)
-				.catch(error => {
-					console.error('Error:', error);
-				});
-		}
-	}
-}
+			email: '',
+			errorMessage:'',
+			successMessage:'',
+			isSubmitting: false,
+			submit(){
+                   				this.isSubmitting = true;
+				wp.apiFetch( {
+					path:'/cool-kids/v1/signup',
+					method: 'POST',
+					headers: {
+						'Content-Type': 'application/json',
+						'X-WP-Nonce': this.nonce, // Make sure nonce is set correctly
+					},
+					data: {
+						email: this.signup.email,
+					},
+				})
+					.then((data) => {
+						if (data.success) {
+							this.signup.successMessage = data.message;
+							this.signup.errorMessage = '';
+						}
 
-function coolKidMyAccount() {
-	return {
-		first_name: '',
-		last_name: '',
-		email: '',
-		country: '',
-		role: '',
-		initials: '',
-		errorMessage: '',
-		isLoggedIn: false,
-		nonce: "",
-		fetchMyAccount() {
-			if (!this.isLoggedIn) {
-				return;
+						this.isSubmitting = false;
+					})
+					.catch((error) => {
+						this.signup.errorMessage = error.message;
+						this.signup.successMessage = '';
+						this.signup.isSubmitting = false;
+
+					});
+
 			}
-			fetch('/wp-json/cool-kids/v1/my-account', {
-				method: 'GET',
-				credentials: 'include', // Ensures cookies are sent
+		},
 
-				headers: {
-					'Content-Type': 'application/json',
-					'X-WP-Nonce': this.nonce,
-				}
-			})
-				.then(response => response.json())
-				.then(data => {
-					if (data.error) {
-						this.errorMessage = data.message;
-						return;
-					}
-					this.email = data.email;
-					this.first_name = data.first_name;
-					this.last_name = data.last_name;
-					this.country = data.country;
-					this.role = data.role;
-					this.initials = data.initials;
-				})
-				.catch(error => {
-					console.error('Error:', error);
-					this.errorMessage = 'An error occurred while fetching account data';
-				});
-		}
-	}
-}
+	});
 
-function coolKidList() {
-	return {
-		coolKids: [],
-		errorMessage: '',
-		nonce: '',
-		page: 1,
-		showLoadMore: false,
-		fetchList() {
-			fetch(`/wp-json/cool-kids/v1/list?page=${this.page}`, {
-				method: 'GET',
-				credentials: 'include', // Ensures cookies are sent
-				headers: {
-					'Content-Type': 'application/json',
-					'X-WP-Nonce': this.nonce,
-				}
-			})
-				.then(response => response.json())
-				.then(data => {
-					if (data.error) {
-						this.errorMessage = data.message;
-						return;
-					}
+});
 
-					this.showLoadMore = data.length > 0;
-
-					this.coolKids = [...this.coolKids, ...data];
-
-				})
-				.catch(error => {
-					console.error('Error:', error);
-					this.errorMessage = 'An error occurred while fetching cool kids';
-				});
-		}
-	}
-}
-
+wp.domReady(() => {
+	Alpine.store('CoolKids').isLoaded = true;
+});

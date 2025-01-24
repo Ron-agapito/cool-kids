@@ -1,5 +1,5 @@
 <?php // phpcs:ignore
-
+require 'vendor/autoload.php';
 /**
  * Cool Kids Plugin
  *
@@ -28,7 +28,7 @@ final class Cool_Kids {
 	/**
 	 * The single instance of the class
 	 *
-	 * @var $instnce
+	 * @var $instance
 	 */
 	private static $instance = null;
 	/**
@@ -36,7 +36,7 @@ final class Cool_Kids {
 	 *
 	 * @var array $roles.
 	 */
-	private $roles = array( 'cool_kid', 'cooler_kid', 'coolest_kid' );
+	public $roles = array( 'cool_kid', 'cooler_kid', 'coolest_kid' );
 
 	/**
 	 *  API key for authentication.
@@ -110,8 +110,7 @@ final class Cool_Kids {
 	 * Sets up the shortcodes.
 	 */
 	private function setup_shortcodes() {
-		add_shortcode( 'cool_kid_signup', array( $this, 'shortcode_signup' ) );
-		add_shortcode( 'cool_kid_my_account', array( $this, 'shortcode_my_account' ) );
+		add_shortcode( 'cool_kids', array( $this, 'shortcode_cool_kids' ) );
 	}
 
 	/**
@@ -122,9 +121,10 @@ final class Cool_Kids {
 			'wp_enqueue_scripts',
 			function () {
 				wp_enqueue_style( 'cool-kids', plugin_dir_url( __FILE__ ) . 'assets/css/dist/cool-kids.css', array(), '1.0.0' );
-				wp_enqueue_script( 'cool-kids', plugin_dir_url( __FILE__ ) . 'assets/js/cool-kids.js', array(), '1.0.0', true );
+				wp_enqueue_script( 'cool-kids', plugin_dir_url( __FILE__ ) . 'assets/js/cool-kids.js', array( 'wp-api-fetch', 'wp-dom-ready' ), '1.0.0', true );
 
-				wp_enqueue_script( 'alpinejs', 'https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js', array(), '3.14.8', true );
+				wp_enqueue_script( 'alpinejs', 'https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js', array(), '3.14.8', array( 'strategy' => 'defer' ) );
+				wp_script_add_data( 'alpinejs', 'defer', true );
 			}
 		);
 	}
@@ -185,10 +185,7 @@ final class Cool_Kids {
 					array(
 						'methods'             => 'GET',
 						'callback'            => array( $this, 'rest_my_account' ),
-
-						'permission_callback' => function ( $request ) {
-							return $this->verify_nonce( $request, 'wp_rest' );
-						},
+						'permission_callback' => '__return_true',
 
 					)
 				);
@@ -396,24 +393,28 @@ final class Cool_Kids {
 	}
 
 	/**
-	 * Displays the "Sign Up" shortcode content.
+	 * Shortcode handler for cool kids.
+	 *
+	 * @param array $atts contains title and description.
 	 */
-	public function shortcode_signup() {
+	public function shortcode_cool_kids( $atts ) {
 
-		$nonce = wp_create_nonce( 'wp_rest' );
+		$atts  = shortcode_atts(
+			array(
+				'title'       => '',
+				'description' => '',
+			),
+			$atts,
+			'cool_kids'
+		);
+		$title = $atts['title'];
 
-		include plugin_dir_path( __FILE__ ) . 'views/signup.php';
-	}
+		$description = $atts['description'];
+		ob_start();
+		include plugin_dir_path( __FILE__ ) . 'views/cool-kids.php';
+		$html = ob_get_clean();
 
-	/**
-	 * Displays the "My Account" shortcode content.
-	 */
-	public function shortcode_my_account() {
-
-		$nonce        = wp_create_nonce( 'wp_rest' );
-		$is_logged_in = is_user_logged_in();
-
-		include plugin_dir_path( __FILE__ ) . 'views/my-account.php';
+		return $html;
 	}
 
 	/**
@@ -455,7 +456,7 @@ final class Cool_Kids {
 		if ( ! $user ) {
 			return new WP_Error(
 				'rest_login_failed',
-				esc_html__( 'Invalid email 2' ) . $data['email'],
+				esc_html__( 'User not found.' ),
 				array(
 					'status' => 403,
 					'error'  => true,
@@ -470,20 +471,17 @@ final class Cool_Kids {
 		if ( is_wp_error( $user ) ) {
 			return new WP_Error(
 				'rest_login_failed',
-				esc_html__( 'Invalid email' ),
+				esc_html__( 'Unable to login' ),
 				array(
 					'status' => 403,
 					'error'  => true,
 				)
 			);
 		}
-
-		$nonce = wp_create_nonce( 'wp_rest' );
-
-		return array(
-			'message' => 'User logged in successfully',
-			'success' => true,
-			'nonce'   => $nonce,
+		return wp_send_json_success(
+			array(
+				'message' => 'User logged in successfully',
+			)
 		);
 	}
 
@@ -512,9 +510,9 @@ final class Cool_Kids {
 		$response   = wp_remote_get( 'https://randomuser.me/api/' );
 		$body       = wp_remote_retrieve_body( $response );
 		$data       = json_decode( $body );
-		$first_name = $data->results[0]->name->first;
-		$last_name  = $data->results[0]->name->last;
-		$country    = $data->results[0]->location->country;
+		$first_name = sanitize_text_field( $data->results[0]->name->first );
+		$last_name  = sanitize_text_field( $data->results[0]->name->last );
+		$country    = sanitize_text_field( $data->results[0]->location->country );
 		update_user_meta( $user, 'first_name', $first_name );
 		update_user_meta( $user, 'last_name', $last_name );
 		update_user_meta( $user, 'cool_kid_country', $country );

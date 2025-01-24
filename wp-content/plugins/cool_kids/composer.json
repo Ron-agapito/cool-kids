@@ -1,0 +1,18 @@
+{
+    "require-dev": {
+        "squizlabs/php_codesniffer": "^3.11",
+        "wp-coding-standards/wpcs": "^3.1",
+        "phpunit/phpunit": "^11.5",
+        "yoast/phpunit-polyfills": "^3.0"
+    },
+    "config": {
+        "allow-plugins": {
+            "dealerdirect/phpcodesniffer-composer-installer": true
+        }
+    },
+  "autoload-dev": {
+    "psr-4": {
+      "CoolKids\\Tests\\": "tests/"
+    }
+  }
+}
